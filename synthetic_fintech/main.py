@@ -46,27 +46,43 @@ data = pd.DataFrame({
 
 real_fraud_rate = data['is_fraud'].mean()
 print("── Real data ─────────────────────────────────────")
-print(f"Rows:        {len(data)}")
-print(f"Fraud rate:  {real_fraud_rate:.2%}")
-print(f"Avg amount:  £{data['amount'].mean():.2f}")
+print(f"Rows: {len(data)} | Fraud: {real_fraud_rate:.2%}")
 
-# ── 2. Quantile transform amount ──────────────────────────────────────────────
-# Maps your exact amount distribution → perfect normal bell curve
-# Much more powerful than log transform for heavy-tailed data
-print("\n── Quantile transforming amount ──────────────────")
-qt = QuantileTransformer(output_distribution='normal', random_state=42)
-data['amount_qt'] = qt.fit_transform(data[['amount']]).flatten()
+# ── 2. Stratified split FIRST ─────────────────────────────────────────────────
+fraud_data = data[data['is_fraud']==1].copy().reset_index(drop=True)
+legit_data = data[data['is_fraud']==0].copy().reset_index(drop=True)
 
-print(f"Original amount: skew={data['amount'].skew():.2f} "
-      f"(high = heavy tail)")
-print(f"After QT:        skew={data['amount_qt'].skew():.2f} "
-      f"(close to 0 = bell curve)")
-print("CTGAN can now model this distribution cleanly")
+print("\n── Stratified split ──────────────────────────────")
+print(f"Fraud: {len(fraud_data)} rows | Legit: {len(legit_data)} rows")
+
+# ── 3. Separate QT per stratum — THE FIX ─────────────────────────────────────
+# Each stratum gets its own quantile transformer
+# fitted only on that stratum's amount distribution
+# so inverse transform is always correctly calibrated
+print("\n── Fitting separate QT per stratum ───────────────")
+
+qt_legit = QuantileTransformer(output_distribution='normal', random_state=42)
+qt_fraud  = QuantileTransformer(output_distribution='normal', random_state=42)
+
+legit_data = legit_data.copy()
+fraud_data = fraud_data.copy()
+
+legit_data['amount_qt'] = qt_legit.fit_transform(
+    legit_data[['amount']]
+).flatten()
+
+fraud_data['amount_qt'] = qt_fraud.fit_transform(
+    fraud_data[['amount']]
+).flatten()
+
+print(f"Legit QT fitted on {len(legit_data)} rows")
+print(f"Fraud QT fitted on {len(fraud_data)} rows")
 
 # Drop original amount — model trains on amount_qt only
-data_transformed = data.drop(columns=['amount'])
+legit_train = legit_data.drop(columns=['amount'])
+fraud_train = fraud_data.drop(columns=['amount'])
 
-# ── 3. SMOTE ──────────────────────────────────────────────────────────────────
+# ── 4. SMOTE on fraud ─────────────────────────────────────────────────────────
 def manual_smote(minority_df, target_count, random_state=42):
     np.random.seed(random_state)
     numeric_cols     = minority_df.select_dtypes(include=[np.number]).columns.tolist()
@@ -94,14 +110,8 @@ def manual_smote(minority_df, target_count, random_state=42):
         ignore_index=True
     )
 
-# ── 4. Stratified split ───────────────────────────────────────────────────────
-fraud_data   = data_transformed[data_transformed['is_fraud']==1].copy().reset_index(drop=True)
-legit_data   = data_transformed[data_transformed['is_fraud']==0].copy().reset_index(drop=True)
-fraud_smoted = manual_smote(fraud_data, target_count=50)
-
-print(f"\n── Stratified split ──────────────────────────────")
-print(f"Fraud (after SMOTE): {len(fraud_smoted)} rows")
-print(f"Legit:               {len(legit_data)} rows")
+fraud_smoted = manual_smote(fraud_train, target_count=50)
+print(f"\n── SMOTE: fraud rows boosted to {len(fraud_smoted)} ──────────")
 
 # ── 5. Train two CTGANs ───────────────────────────────────────────────────────
 def train_ctgan(df, label):
@@ -115,120 +125,114 @@ def train_ctgan(df, label):
     return synth
 
 fraud_synthesizer = train_ctgan(fraud_smoted, "FRAUD")
-legit_synthesizer = train_ctgan(legit_data,   "LEGIT")
+legit_synthesizer = train_ctgan(legit_train,  "LEGIT")
 
 # ── 6. Generate at exact real ratio ──────────────────────────────────────────
 total_synth   = 500
 n_fraud_synth = round(total_synth * real_fraud_rate)
 n_legit_synth = total_synth - n_fraud_synth
 
-print(f"\n── Generating {total_synth} rows at {real_fraud_rate:.2%} fraud ──────")
+print(f"\n── Generating {total_synth} rows ─────────────────────────")
 synth_fraud = fraud_synthesizer.sample(num_rows=n_fraud_synth)
 synth_legit = legit_synthesizer.sample(num_rows=n_legit_synth)
 
 synth_fraud['is_fraud'] = 1
 synth_legit['is_fraud'] = 0
 
-synthetic_raw = pd.concat(
+# ── 7. Inverse transform using MATCHING QT per stratum ───────────────────────
+print("\n── Inverse transform (matched QT per stratum) ────")
+
+synth_fraud['amount'] = qt_fraud.inverse_transform(
+    pd.DataFrame(synth_fraud['amount_qt'].values, columns=['amount'])
+).flatten()
+
+synth_legit['amount'] = qt_legit.inverse_transform(
+    pd.DataFrame(synth_legit['amount_qt'].values, columns=['amount'])
+).flatten()
+
+synth_fraud['amount'] = synth_fraud['amount'].clip(lower=0).round(2)
+synth_legit['amount'] = synth_legit['amount'].clip(lower=0).round(2)
+
+synth_fraud = synth_fraud.drop(columns=['amount_qt'])
+synth_legit = synth_legit.drop(columns=['amount_qt'])
+
+synthetic_final = pd.concat(
     [synth_fraud, synth_legit], ignore_index=True
 ).sample(frac=1, random_state=42).reset_index(drop=True)
 
-# ── 7. Inverse quantile transform → recover real amount scale ─────────────────
-print("\n── Inverse quantile transform → recovering amounts ─")
-synthetic_raw['amount'] = qt.inverse_transform(
-    synthetic_raw[['amount_qt']].rename(columns={'amount_qt': 'amount'})
-).flatten()
-synthetic_raw['amount'] = synthetic_raw['amount'].clip(lower=0).round(2)
-synthetic_final = synthetic_raw.drop(columns=['amount_qt'])
+print(f"Synthetic avg amount: £{synthetic_final['amount'].mean():.2f}")
+print(f"Real avg amount:      £{data['amount'].mean():.2f}")
 
-print(f"Synthetic avg amount:  £{synthetic_final['amount'].mean():.2f}")
-print(f"Real avg amount:       £{data['amount'].mean():.2f}")
-
-# ── 8. Score everything ───────────────────────────────────────────────────────
-amount_ks, _ = stats.ks_2samp(data['amount'],            synthetic_final['amount'])
-hour_ks,   _ = stats.ks_2samp(data['transaction_hour'],  synthetic_final['transaction_hour'])
-age_ks,    _ = stats.ks_2samp(data['customer_age'],      synthetic_final['customer_age'])
-
+# ── 8. Score ──────────────────────────────────────────────────────────────────
+amount_ks, _ = stats.ks_2samp(data['amount'], synthetic_final['amount'])
+hour_ks,   _ = stats.ks_2samp(data['transaction_hour'], synthetic_final['transaction_hour'])
 synth_fraud_rate = synthetic_final['is_fraud'].mean()
 fraud_error      = abs(synth_fraud_rate - real_fraud_rate) / real_fraud_rate * 100
-
 real_set  = set(data.apply(lambda x: tuple(x), axis=1))
 synth_set = set(synthetic_final.apply(lambda x: tuple(x), axis=1))
 leaks     = len(real_set.intersection(synth_set))
 
-print(f"\n── Full scorecard ────────────────────────────────")
-print(f"{'Metric':<25} {'Target':>8} {'Exp 5':>8} {'Exp 6':>8} {'Status':>12}")
+print("\n── FINAL SCORECARD ───────────────────────────────")
+print(f"{'Metric':<25} {'Target':>8} {'Exp 6':>8} {'Exp 7':>8} {'Status':>12}")
 print("─" * 65)
 
 results = [
     ('Fraud rate error', '< 10%',  '0.0%',  f'{fraud_error:.1f}%',
-     'SOLVED' if fraud_error < 10 else 'NEEDS WORK'),
-    ('Amount KS',        '< 0.15', '0.450', f'{amount_ks:.4f}',
-     'SOLVED' if amount_ks < 0.15 else 'NEEDS WORK'),
-    ('Hour KS',          '< 0.10', '0.250', f'{hour_ks:.4f}',
-     'SOLVED' if hour_ks < 0.10 else 'NEEDS WORK'),
+     '✓ SOLVED' if fraud_error < 10   else '✗ OPEN'),
+    ('Amount KS',        '< 0.15', '0.488', f'{amount_ks:.4f}',
+     '✓ SOLVED' if amount_ks  < 0.15  else '✗ OPEN'),
+    ('Hour KS',          '< 0.10', '0.228', f'{hour_ks:.4f}',
+     '✓ SOLVED' if hour_ks    < 0.10  else '✗ OPEN'),
     ('Privacy leaks',    '0',      '0',     str(leaks),
-     'SOLVED' if leaks == 0 else 'RISK'),
+     '✓ SOLVED' if leaks == 0        else '✗ RISK'),
 ]
 
-for metric, target, exp5, exp6, status in results:
-    print(f"{metric:<25} {target:>8} {exp5:>8} {exp6:>8} {status:>12}")
+for metric, target, exp6, exp7, status in results:
+    print(f"{metric:<25} {target:>8} {exp6:>8} {exp7:>8} {status:>12}")
 
-solved = sum(1 for *_, s in results if s == 'SOLVED')
+solved = sum(1 for *_, s in results if '✓' in s)
 print(f"\n{solved}/4 metrics solved")
 
-# ── 9. Charts ─────────────────────────────────────────────────────────────────
-fig, axes = plt.subplots(2, 2, figsize=(13, 9))
-fig.suptitle('Experiment 6: Quantile Transform — Final Push', fontsize=13)
+if solved == 4:
+    print("ALL METRICS SOLVED — pipeline ready to productionise")
+elif solved == 3:
+    print("3/4 solved — good enough to build on, one open problem remains")
+else:
+    print("Pipeline needs more work before productionising")
 
-# Amount distribution
-axes[0,0].hist(data['amount'].clip(0, 500), bins=40,
-               alpha=0.6, label='Real', color='steelblue', edgecolor='white')
-axes[0,0].hist(synthetic_final['amount'].clip(0, 500), bins=40,
-               alpha=0.6, label='Synthetic', color='mediumpurple', edgecolor='white')
-axes[0,0].set_title(f'Transaction Amount\nKS: {amount_ks:.4f} (target < 0.15)')
-axes[0,0].set_xlabel('Amount £')
-axes[0,0].legend()
+# ── 9. Final chart ────────────────────────────────────────────────────────────
+fig, axes = plt.subplots(1, 3, figsize=(14, 5))
+fig.suptitle('Experiment 7: Separate QT Per Stratum — Final Research Result',
+             fontsize=12)
 
-# Quantile transformed view
-axes[0,1].hist(data['amount_qt'], bins=40,
-               alpha=0.6, label='Real (QT)', color='steelblue', edgecolor='white')
-axes[0,1].hist(synthetic_raw['amount_qt'], bins=40,
-               alpha=0.6, label='Synthetic (QT)', color='mediumpurple', edgecolor='white')
-axes[0,1].set_title('Amount After Quantile Transform\n(what CTGAN learned)')
-axes[0,1].set_xlabel('Transformed amount')
-axes[0,1].legend()
+axes[0].hist(data['amount'].clip(0,500), bins=40,
+             alpha=0.6, label='Real', color='steelblue', edgecolor='white')
+axes[0].hist(synthetic_final['amount'].clip(0,500), bins=40,
+             alpha=0.6, label='Synthetic', color='mediumpurple', edgecolor='white')
+axes[0].set_title(f'Amount Distribution\nKS: {amount_ks:.4f} (target < 0.15)')
+axes[0].set_xlabel('Amount £')
+axes[0].legend()
 
-# Transaction hour
-axes[1,0].hist(data['transaction_hour'], bins=range(0, 25),
-               alpha=0.6, label='Real', color='steelblue', edgecolor='white')
-axes[1,0].hist(synthetic_final['transaction_hour'], bins=range(0, 25),
-               alpha=0.6, label='Synthetic', color='mediumpurple', edgecolor='white')
-axes[1,0].set_title(f'Transaction Hour\nKS: {hour_ks:.4f}')
-axes[1,0].set_xlabel('Hour of day')
-axes[1,0].legend()
+axes[1].hist(data['transaction_hour'], bins=range(0,25),
+             alpha=0.6, label='Real', color='steelblue', edgecolor='white')
+axes[1].hist(synthetic_final['transaction_hour'], bins=range(0,25),
+             alpha=0.6, label='Synthetic', color='mediumpurple', edgecolor='white')
+axes[1].set_title(f'Transaction Hour\nKS: {hour_ks:.4f} (target < 0.10)')
+axes[1].set_xlabel('Hour of day')
+axes[1].legend()
 
-# Progress across all 6 experiments
-exp_labels  = ['Exp1\nGauss', 'Exp2\nCTGAN', 'Exp3\nCyclical',
-               'Exp4\nStratified', 'Exp5\nLog', 'Exp6\nQuantile']
-amount_hist = [0.570, 0.570, 0.570, 0.570, 0.450, amount_ks]
-fraud_hist  = [0.09,  1.78,  0.98,  0.00,  0.00,  fraud_error/100]
-x = np.arange(len(exp_labels))
-w = 0.35
-bars1 = axes[1,1].bar(x - w/2, amount_hist, w,
-                       label='Amount KS', color='steelblue', alpha=0.8)
-bars2 = axes[1,1].bar(x + w/2, fraud_hist, w,
-                       label='Fraud error', color='coral', alpha=0.8)
-axes[1,1].axhline(y=0.15, color='steelblue', linestyle='--',
-                   alpha=0.5, label='Amount target')
-axes[1,1].axhline(y=0.10, color='red', linestyle='--',
-                   alpha=0.5, label='Fraud target')
-axes[1,1].set_xticks(x)
-axes[1,1].set_xticklabels(exp_labels, fontsize=8)
-axes[1,1].set_title('Progress Across All Experiments')
-axes[1,1].legend(fontsize=7)
+experiments  = ['Exp1', 'Exp2', 'Exp3', 'Exp4', 'Exp5', 'Exp6', 'Exp7']
+amount_prog  = [0.570,   0.570,  0.570,  0.570,  0.450,  0.488,  amount_ks]
+axes[2].plot(experiments, amount_prog, 'o-',
+             color='mediumpurple', linewidth=2, markersize=6, label='Amount KS')
+axes[2].axhline(y=0.15, color='mediumpurple', linestyle='--',
+                alpha=0.5, label='Amount target')
+axes[2].set_title('Amount KS Progress\nAcross All Experiments')
+axes[2].set_ylabel('KS Score (lower = better)')
+axes[2].legend(fontsize=8)
+axes[2].grid(alpha=0.3)
 
 plt.tight_layout()
-plt.savefig('exp6_quantile.png', dpi=150, bbox_inches='tight')
-print("\n── Saved: exp6_quantile.png ──────────────────────")
-print("Open it in the sidebar.")
+plt.savefig('exp7_final.png', dpi=150, bbox_inches='tight')
+print("\n── Saved: exp7_final.png ─────────────────────────")
+print("Research phase complete. Time to build the product.")
