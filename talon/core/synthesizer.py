@@ -268,6 +268,9 @@ def synthesize(df: pd.DataFrame,
     # Score
     fidelity = compute_fidelity(df, synthetic)
 
+    # Clean up transaction IDs — reset to sequential integers
+    synthetic['transaction_id'] = range(1, len(synthetic) + 1)
+
     return {
         'success':   True,
         'synthetic': synthetic,
