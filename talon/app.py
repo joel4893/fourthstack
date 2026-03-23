@@ -8,7 +8,7 @@ import pandas as pd
 import requests
 import time
 
-API_URL = "https://talon-api-uvs9.onrender.com"
+API_URL = "http://localhost:8000"
 
 st.set_page_config(
     page_title="Talon",
