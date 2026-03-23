@@ -1,4 +1,4 @@
-# Parity — Synthetic Financial Data Research
+# Talon — Synthetic Financial Data Research
 
 ## What this is
 A research pipeline exploring high-fidelity synthetic 
