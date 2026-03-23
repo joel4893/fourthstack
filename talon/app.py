@@ -54,7 +54,7 @@ if st.button("Download sample transaction data"):
             mime="text/csv"
         )
     except Exception:
-        st.error("API not reachable. Try again in 30 seconds.")
+        st.error("API not reachable. Try again in 120 seconds.")
 
 st.divider()
 
@@ -90,6 +90,17 @@ if uploaded:
 
     if st.button("Generate", type="primary", use_container_width=True):
 
+        # ── Wake up API first ─────────────────────────────────────────────────
+        with st.spinner("Waking up API... (first request takes ~30s on free tier)"):
+            try:
+                wake = requests.get(f"{API_URL}/health", timeout=60)
+                if wake.status_code != 200:
+                    st.error("API not responding. Try again.")
+                    st.stop()
+            except Exception:
+                st.error("API unreachable. Try again in 30 seconds.")
+                st.stop()
+
         # ── Submit job ────────────────────────────────────────────────────────
         try:
             uploaded.seek(0)
@@ -97,7 +108,7 @@ if uploaded:
                 f"{API_URL}/synthesize",
                 files={"file": ("data.csv", uploaded, "text/csv")},
                 params={"n_rows": n_rows},
-                timeout=30
+                timeout=120
             )
 
             if submit.status_code != 200:

@@ -16,8 +16,24 @@ import os
 import uuid
 import threading
 
+def keep_alive():
+    """Ping own health endpoint every 5 mins to prevent Render spin-down."""
+    import time
+    import urllib.request
+    while True:
+        time.sleep(270)
+        try:
+            urllib.request.urlopen(
+                "https://talon-api-uvs9.onrender.com/health",
+                timeout=10
+            )
+        except Exception:
+            pass
+
+threading.Thread(target=keep_alive, daemon=True).start()
+
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from core.synthesizer import synthesize, validate_dataframe
+from core.synthesizer import synthesize, validate_dataframe  # noqa: E402
 
 app = FastAPI(
     title="Talon",
