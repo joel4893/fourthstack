@@ -20,7 +20,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from core.synthesizer import synthesize, validate_dataframe
 
 app = FastAPI(
-    title="Parity",
+    title="Talon",
     description="High-fidelity synthetic financial data. Zero PII.",
     version="0.1.0"
 )

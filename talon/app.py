@@ -1,5 +1,5 @@
 """
-Parity — Frontend
+Talon — Frontend
 Upload real transaction CSV → get synthetic data + fidelity report
 """
 
@@ -11,16 +11,19 @@ import os
 
 # ── Page config ───────────────────────────────────────────────────────────────
 st.set_page_config(
-    page_title="Parity",
+    page_title="Talon",
     page_icon="⬡",
     layout="centered"
 )
 
 # ── API URL — switch to Render URL once deployed ──────────────────────────────
-API_URL = os.getenv("API_URL", "http://localhost:8000")
-
+# Prefer an environment variable so deployments can override the default URL.
+API_URL = os.environ.get(
+    "TALON_API_URL",
+    "https://talon-api-uvs9.onrender.com"
+)
 # ── Header ────────────────────────────────────────────────────────────────────
-st.title("⬡ Parity")
+st.title("⬡ Talon")
 st.caption("High-fidelity synthetic financial data. Zero PII.")
 st.divider()
 
@@ -29,7 +32,7 @@ with st.sidebar:
     st.header("How it works")
     st.markdown("""
     1. Upload your real transaction CSV
-    2. Parity trains on your data locally
+    2. Talon trains on your data locally
     3. Generates statistically identical synthetic data
     4. Zero real records in the output — guaranteed
     
@@ -97,7 +100,7 @@ if uploaded:
         help="Defaults to same size as your input"
     )
 
-    if st.button("Generate", type="primary", use_container_width=True):
+    if st.button("Generate", use_container_width=True):
         with st.spinner("Training synthesis model... (~4 minutes)"):
             start = time.time()
 

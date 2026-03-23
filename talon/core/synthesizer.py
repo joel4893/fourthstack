@@ -1,10 +1,7 @@
 """
-Parity — Core Synthesis Pipeline
+Talon — Core Synthesis Pipeline
 Converts real financial transaction data into high-fidelity
 synthetic data with zero privacy leakage.
-
-Research basis: 7 experiments on temporal fidelity,
-fraud rate preservation, and amount distribution.
 """
 
 import pandas as pd
