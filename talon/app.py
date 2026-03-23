@@ -70,7 +70,7 @@ if uploaded:
     st.success(f"Loaded {len(df):,} rows")
 
     with st.expander("Preview"):
-        st.dataframe(df.head(5), use_container_width=True)
+        st.dataframe(df.head(5), width="stretch")
 
     col1, col2 = st.columns(2)
     col1.metric("Total rows", f"{len(df):,}")
@@ -88,7 +88,7 @@ if uploaded:
         step=50
     )
 
-    if st.button("Generate", type="primary", use_container_width=True):
+    if st.button("Generate", type="primary", width="stretch"):
 
         # ── Wake up API first ─────────────────────────────────────────────────
         with st.spinner("Waking up API... (first request takes ~30s on free tier)"):
@@ -208,7 +208,7 @@ if uploaded:
         st.divider()
         st.subheader("Synthetic data preview")
         st.caption("First 10 rows — zero real records present")
-        st.dataframe(pd.DataFrame(preview), use_container_width=True)
+        st.dataframe(pd.DataFrame(preview), width="stretch")
 
         st.divider()
         st.subheader("Download")
@@ -223,7 +223,7 @@ if uploaded:
                 data=r_csv.content,
                 file_name="synthetic_transactions.csv",
                 mime="text/csv",
-                use_container_width=True
+                width="stretch"
             )
         except Exception:
             st.warning("Refresh to download — result is ready on the server.")

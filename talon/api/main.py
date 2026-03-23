@@ -33,7 +33,6 @@ def keep_alive():
 threading.Thread(target=keep_alive, daemon=True).start()
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from core.synthesizer import synthesize, validate_dataframe  # noqa: E402
 
 app = FastAPI(
     title="Talon",
@@ -102,6 +101,7 @@ def sample():
 def run_synthesis(job_id: str, df: pd.DataFrame, n_rows: int):
     """Runs in background thread. Updates jobs dict when done."""
     try:
+        from core.synthesizer import synthesize
         jobs[job_id]['status'] = 'running'
         result = synthesize(df, n_rows=n_rows)
 
@@ -153,6 +153,7 @@ async def submit_job(
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Could not read CSV: {str(e)}")
 
+    from core.synthesizer import validate_dataframe
     validation = validate_dataframe(df)
     if not validation['valid']:
         raise HTTPException(status_code=422, detail={
