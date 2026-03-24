@@ -21,6 +21,21 @@ st.title("⬡ Talon")
 st.caption("High-fidelity synthetic financial data. Zero PII.")
 st.divider()
 
+# Debug: show resolved API URL and quick connectivity test (temporary)
+st.markdown("**Resolved API URL:**")
+st.code(API_URL)
+
+if st.button("Test API connectivity"):
+    try:
+        resp = requests.get(f"{API_URL}/health", timeout=10)
+        st.success(f"/health returned {resp.status_code}")
+        try:
+            st.json(resp.json())
+        except Exception:
+            st.text(resp.text)
+    except Exception as e:
+        st.error(f"Connectivity test failed: {e}")
+
 # ── Sidebar ───────────────────────────────────────────────────────────────────
 with st.sidebar:
     st.header("How it works")
