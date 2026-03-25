@@ -11,6 +11,7 @@ from sklearn.preprocessing import QuantileTransformer
 from sdv.metadata import SingleTableMetadata
 from sdv.single_table import CTGANSynthesizer
 import warnings
+import gc
 warnings.filterwarnings('ignore')
 
 
@@ -111,9 +112,14 @@ def _train_and_sample(df: pd.DataFrame,
     meta.detect_from_dataframe(df)
     if 'transaction_id' in df.columns:
         meta.update_column(column_name='transaction_id', sdtype='id')
-    synth = CTGANSynthesizer(meta, epochs=CTGAN_EPOCHS, verbose=False)
+    
+    # batch_size=50 drastically reduces memory usage (default is 500)
+    synth = CTGANSynthesizer(meta, epochs=CTGAN_EPOCHS, verbose=False, batch_size=50)
     synth.fit(df)
-    return synth.sample(num_rows=n_rows)
+    result = synth.sample(num_rows=n_rows)
+    del synth
+    gc.collect()
+    return result
 
 
 # ── Fidelity scoring ──────────────────────────────────────────────────────────
@@ -203,6 +209,11 @@ def synthesize(df: pd.DataFrame,
 
     n_rows = n_rows or len(df)
 
+    # Memory optimization: Downcast floats to 32-bit
+    for col in df.select_dtypes(include=['float64']).columns:
+        df[col] = df[col].astype('float32')
+    gc.collect()
+
     # Stratified split
     fraud_df = df[df['is_fraud'] == 1].copy().reset_index(drop=True)
     legit_df = df[df['is_fraud'] == 0].copy().reset_index(drop=True)
@@ -237,7 +248,10 @@ def synthesize(df: pd.DataFrame,
 
     # Train + generate
     synth_fraud = _train_and_sample(fraud_smoted, n_fraud_synth, 'fraud')
+    gc.collect() # Free memory before training next model
+    
     synth_legit = _train_and_sample(legit_train,  n_legit_synth, 'legit')
+    gc.collect()
 
     # Force correct labels
     synth_fraud['is_fraud'] = 1

@@ -190,6 +190,13 @@ async def submit_job(
             "errors":  validation['errors']
         })
 
+    # Prevent OOM: Only allow one synthesis job at a time on free tier
+    if any(t.name == 'synthesis_worker' and t.is_alive() for t in threading.enumerate()):
+        raise HTTPException(
+            status_code=429, 
+            detail="Server is busy processing another job. Please try again in a minute."
+        )
+
     # Create job
     job_id = str(uuid.uuid4())[:8]
     with get_db() as conn:
@@ -201,7 +208,8 @@ async def submit_job(
     thread = threading.Thread(
         target=run_synthesis,
         args=(job_id, df, n),
-        daemon=True
+        daemon=True,
+        name='synthesis_worker'
     )
     thread.start()
 
