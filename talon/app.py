@@ -162,7 +162,15 @@ if uploaded:
 
                 if poll.status_code != 200:
                     # Non-OK responses should be visible to the user
-                    status_text.warning(f"Polling: HTTP {poll.status_code} — {poll.text[:200]}")
+                    if poll.status_code == 502:
+                        status_text.warning("Server busy or restarting (HTTP 502). Retrying...")
+                    elif poll.status_code == 404:
+                        # Job lost (likely due to server restart clearing non-persistent DB)
+                        st.error("Job not found. The server may have restarted. Please resubmit.")
+                        st.stop()
+                    else:
+                        status_text.warning(f"Polling: HTTP {poll.status_code} — {poll.text[:200]}")
+
                     retry_count += 1
                     sleep_time = min(backoff_base ** retry_count, max_backoff)
                     time.sleep(sleep_time)

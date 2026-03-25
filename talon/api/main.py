@@ -18,6 +18,7 @@ import threading
 import sqlite3
 import json
 import tempfile
+import gc
 
 def keep_alive():
     """Ping own health endpoint every 5 mins to prevent Render spin-down."""
@@ -136,6 +137,7 @@ def run_synthesis(job_id: str, df: pd.DataFrame, n_rows: int):
             conn.commit()
 
         result = synthesize(df, n_rows=n_rows)
+        gc.collect()
 
         if result['success']:
             # Store CSV as string

@@ -21,7 +21,7 @@ REQUIRED_COLUMNS = {
 }
 MIN_ROWS         = 100
 SMOTE_TARGET     = 50
-CTGAN_EPOCHS     = 150
+CTGAN_EPOCHS     = 50
 
 
 # ── Validation ────────────────────────────────────────────────────────────────
