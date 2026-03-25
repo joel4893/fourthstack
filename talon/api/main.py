@@ -17,6 +17,7 @@ import uuid
 import threading
 import sqlite3
 import json
+import tempfile
 
 def keep_alive():
     """Ping own health endpoint every 5 mins to prevent Render spin-down."""
@@ -43,7 +44,7 @@ app = FastAPI(
 )
 
 # ── Persistent job store (SQLite) ─────────────────────────────────────────────
-DB_PATH = os.path.join(os.path.dirname(__file__), "jobs.db")
+DB_PATH = os.path.join(tempfile.gettempdir(), "jobs.db")
 
 def get_db():
     conn = sqlite3.connect(DB_PATH)
@@ -51,17 +52,22 @@ def get_db():
     return conn
 
 def init_db():
-    with get_db() as conn:
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS jobs (
-                job_id TEXT PRIMARY KEY,
-                status TEXT,
-                csv TEXT,
-                fidelity TEXT,
-                preview TEXT,
-                error TEXT
-            )
-        """)
+    try:
+        with get_db() as conn:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS jobs (
+                    job_id TEXT PRIMARY KEY,
+                    status TEXT,
+                    csv TEXT,
+                    fidelity TEXT,
+                    preview TEXT,
+                    error TEXT
+                )
+            """)
+        print(f"Database initialized at {DB_PATH}", file=sys.stderr)
+    except Exception as e:
+        print(f"FATAL: Database initialization failed: {e}", file=sys.stderr)
+        raise e
 
 init_db()
 
