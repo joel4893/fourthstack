@@ -7,8 +7,10 @@ import streamlit as st
 import pandas as pd
 import requests
 import time
+import os
 
-API_URL = "https://talon-api-uvs9.onrender.com"
+# Resolve API URL from environment (set TALON_API_URL in deployment/secrets)
+API_URL = os.environ.get("TALON_API_URL", "https://talon-api-uvs9.onrender.com")
 
 st.set_page_config(
     page_title="Talon",
@@ -20,10 +22,6 @@ st.set_page_config(
 st.title("⬡ Talon")
 st.caption("High-fidelity synthetic financial data. Zero PII.")
 st.divider()
-
-# Debug: show resolved API URL and quick connectivity test (temporary)
-st.markdown("**Resolved API URL:**")
-st.code(API_URL)
 
 if st.button("Test API connectivity"):
     try:
@@ -103,7 +101,7 @@ if uploaded:
         step=50
     )
 
-    if st.button("Generate", type="primary", width="stretch"):
+    if st.button("Generate"):
 
         # ── Wake up API first ─────────────────────────────────────────────────
         with st.spinner("Waking up API... (first request takes ~30s on free tier)"):
@@ -147,20 +145,45 @@ if uploaded:
         poll_interval = 5
         fake_progress = 0
 
+        # Robust polling with retries + exponential backoff for transient errors
+        retry_count = 0
+        max_retries = 6
+        backoff_base = 2
+        max_backoff = 30
+
         while True:
             elapsed = int(time.time() - start)
 
             try:
                 poll = requests.get(
                     f"{API_URL}/status/{job_id}",
-                    timeout=10
+                    timeout=15
                 )
-                poll_data = poll.json()
-                status    = poll_data['status']
 
-            except Exception:
-                status_text.warning("Polling... API temporarily unreachable")
-                time.sleep(poll_interval)
+                if poll.status_code != 200:
+                    # Non-OK responses should be visible to the user
+                    status_text.warning(f"Polling: HTTP {poll.status_code} — {poll.text[:200]}")
+                    retry_count += 1
+                    sleep_time = min(backoff_base ** retry_count, max_backoff)
+                    time.sleep(sleep_time)
+                    if retry_count > max_retries:
+                        st.error("Polling failed repeatedly — try again later.")
+                        st.stop()
+                    continue
+
+                poll_data = poll.json()
+                status    = poll_data.get('status')
+                retry_count = 0
+
+            except Exception as e:
+                # Network error / timeout — exponential backoff
+                retry_count += 1
+                sleep_time = min(backoff_base ** retry_count, max_backoff)
+                status_text.warning(f"Polling error ({e.__class__.__name__}): {str(e)[:200]} — retrying in {sleep_time}s")
+                if retry_count > max_retries:
+                    st.error("Unable to reach API after several attempts. Try again later.")
+                    st.stop()
+                time.sleep(sleep_time)
                 continue
 
             # Update UI
