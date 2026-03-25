@@ -15,6 +15,8 @@ import sys
 import os
 import uuid
 import threading
+import sqlite3
+import json
 
 def keep_alive():
     """Ping own health endpoint every 5 mins to prevent Render spin-down."""
@@ -40,18 +42,38 @@ app = FastAPI(
     version="0.2.0"
 )
 
-# ── In-memory job store ───────────────────────────────────────────────────────
-# Simple dict — good enough for MVP
-# Key: job_id, Value: {status, result, error, fidelity}
-jobs = {}
+# ── Persistent job store (SQLite) ─────────────────────────────────────────────
+DB_PATH = os.path.join(os.path.dirname(__file__), "jobs.db")
+
+def get_db():
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+def init_db():
+    with get_db() as conn:
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS jobs (
+                job_id TEXT PRIMARY KEY,
+                status TEXT,
+                csv TEXT,
+                fidelity TEXT,
+                preview TEXT,
+                error TEXT
+            )
+        """)
+
+init_db()
 
 # ── Health ────────────────────────────────────────────────────────────────────
 @app.get("/health")
 def health():
+    with get_db() as conn:
+        active_count = conn.execute("SELECT COUNT(*) FROM jobs WHERE status = 'running'").fetchone()[0]
     return {
         "status": "ok",
         "version": "0.2.0",
-        "active_jobs": len([j for j in jobs.values() if j['status'] == 'running'])
+        "active_jobs": active_count
     }
 
 # ── Sample CSV ────────────────────────────────────────────────────────────────
@@ -102,36 +124,34 @@ def run_synthesis(job_id: str, df: pd.DataFrame, n_rows: int):
     """Runs in background thread. Updates jobs dict when done."""
     try:
         from core.synthesizer import synthesize
-        jobs[job_id]['status'] = 'running'
+        with get_db() as conn:
+            conn.execute("UPDATE jobs SET status = 'running' WHERE job_id = ?", (job_id,))
+            conn.commit()
+
         result = synthesize(df, n_rows=n_rows)
 
         if result['success']:
             # Store CSV as string
             stream = io.StringIO()
             result['synthetic'].to_csv(stream, index=False)
-            jobs[job_id] = {
-                'status':   'done',
-                'csv':      stream.getvalue(),
-                'fidelity': result['fidelity'],
-                'preview':  result['synthetic'].head(10).to_dict(orient='records'),
-                'error':    None
-            }
+
+            with get_db() as conn:
+                conn.execute(
+                    "UPDATE jobs SET status = 'done', csv = ?, fidelity = ?, preview = ? WHERE job_id = ?",
+                    (stream.getvalue(), json.dumps(result['fidelity']),
+                     json.dumps(result['synthetic'].head(10).to_dict(orient='records')), job_id)
+                )
+                conn.commit()
         else:
-            jobs[job_id] = {
-                'status': 'failed',
-                'csv':    None,
-                'fidelity': None,
-                'preview':  None,
-                'error':  result['errors']
-            }
+            with get_db() as conn:
+                conn.execute("UPDATE jobs SET status = 'failed', error = ? WHERE job_id = ?",
+                             (json.dumps(result['errors']), job_id))
+                conn.commit()
     except Exception as e:
-        jobs[job_id] = {
-            'status': 'failed',
-            'csv':    None,
-            'fidelity': None,
-            'preview':  None,
-            'error':  [str(e)]
-        }
+        with get_db() as conn:
+            conn.execute("UPDATE jobs SET status = 'failed', error = ? WHERE job_id = ?",
+                         (json.dumps([str(e)]), job_id))
+            conn.commit()
 
 # ── Submit job ────────────────────────────────────────────────────────────────
 @app.post("/synthesize")
@@ -163,13 +183,9 @@ async def submit_job(
 
     # Create job
     job_id = str(uuid.uuid4())[:8]
-    jobs[job_id] = {
-        'status':   'queued',
-        'csv':      None,
-        'fidelity': None,
-        'preview':  None,
-        'error':    None
-    }
+    with get_db() as conn:
+        conn.execute("INSERT INTO jobs (job_id, status) VALUES (?, ?)", (job_id, 'queued'))
+        conn.commit()
 
     # Run in background thread so request returns immediately
     n = n_rows or len(df)
@@ -190,31 +206,34 @@ async def submit_job(
 # ── Poll status ───────────────────────────────────────────────────────────────
 @app.get("/status/{job_id}")
 def job_status(job_id: str):
-    if job_id not in jobs:
+    with get_db() as conn:
+        job = conn.execute("SELECT * FROM jobs WHERE job_id = ?", (job_id,)).fetchone()
+
+    if not job:
         raise HTTPException(status_code=404, detail="Job not found")
 
-    job = jobs[job_id]
     response = {
         "job_id": job_id,
         "status": job['status']
     }
 
     if job['status'] == 'done':
-        response['fidelity'] = job['fidelity']
-        response['preview']  = job['preview']
+        response['fidelity'] = json.loads(job['fidelity'])
+        response['preview']  = json.loads(job['preview'])
 
     if job['status'] == 'failed':
-        response['error'] = job['error']
+        response['error'] = json.loads(job['error'])
 
     return response
 
 # ── Download result ───────────────────────────────────────────────────────────
 @app.get("/result/{job_id}")
 def job_result(job_id: str):
-    if job_id not in jobs:
-        raise HTTPException(status_code=404, detail="Job not found")
+    with get_db() as conn:
+        job = conn.execute("SELECT status, csv FROM jobs WHERE job_id = ?", (job_id,)).fetchone()
 
-    job = jobs[job_id]
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
 
     if job['status'] != 'done':
         raise HTTPException(
