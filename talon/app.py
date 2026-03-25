@@ -161,11 +161,15 @@ if uploaded:
             try:
                 poll = requests.get(
                     f"{API_URL}/status/{job_id}",
-                    timeout=60
+                    timeout=20
                 )
 
                 if poll.status_code != 200:
-                    # Non-OK responses should be visible to the user
+                    if poll.status_code == 504:
+                        status_text.warning("Gateway Timeout — Server is processing heavy model. Retrying...")
+                        time.sleep(poll_interval)
+                        continue
+                    
                     if poll.status_code == 502:
                         status_text.warning("Server busy or restarting (HTTP 502). Retrying...")
                     elif poll.status_code == 404:
@@ -187,6 +191,11 @@ if uploaded:
                 status    = poll_data.get('status')
                 retry_count = 0
 
+            except (requests.exceptions.ReadTimeout, requests.exceptions.ConnectTimeout):
+                # Specific handling for timeouts during heavy synthesis
+                status_text.warning("Server is under heavy load (Synthesis in progress)... retrying.")
+                time.sleep(poll_interval)
+                continue
             except Exception as e:
                 # Network error / timeout — exponential backoff
                 retry_count += 1

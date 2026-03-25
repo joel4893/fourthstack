@@ -49,7 +49,8 @@ app = FastAPI(
 DB_PATH = os.path.join(tempfile.gettempdir(), "jobs.db")
 
 def get_db():
-    conn = sqlite3.connect(DB_PATH)
+    # Add 20s timeout to wait for locks before failing
+    conn = sqlite3.connect(DB_PATH, timeout=20)
     conn.row_factory = sqlite3.Row
     return conn
 
