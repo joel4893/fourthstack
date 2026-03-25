@@ -54,6 +54,7 @@ def get_db():
 def init_db():
     try:
         with get_db() as conn:
+            conn.execute("PRAGMA journal_mode=WAL;")
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS jobs (
                     job_id TEXT PRIMARY KEY,
@@ -213,7 +214,11 @@ async def submit_job(
 @app.get("/status/{job_id}")
 def job_status(job_id: str):
     with get_db() as conn:
-        job = conn.execute("SELECT * FROM jobs WHERE job_id = ?", (job_id,)).fetchone()
+        # Select only necessary columns to avoid reading heavy CSV blob
+        job = conn.execute(
+            "SELECT job_id, status, fidelity, preview, error FROM jobs WHERE job_id = ?",
+            (job_id,)
+        ).fetchone()
 
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")

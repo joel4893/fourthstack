@@ -157,7 +157,7 @@ if uploaded:
             try:
                 poll = requests.get(
                     f"{API_URL}/status/{job_id}",
-                    timeout=15
+                    timeout=30
                 )
 
                 if poll.status_code != 200:
