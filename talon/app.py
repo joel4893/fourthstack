@@ -121,7 +121,7 @@ if uploaded:
                 f"{API_URL}/synthesize",
                 files={"file": ("data.csv", uploaded, "text/csv")},
                 params={"n_rows": n_rows},
-                timeout=120
+                timeout=180
             )
 
             if submit.status_code != 200:
@@ -157,7 +157,7 @@ if uploaded:
             try:
                 poll = requests.get(
                     f"{API_URL}/status/{job_id}",
-                    timeout=30
+                    timeout=60
                 )
 
                 if poll.status_code != 200:
