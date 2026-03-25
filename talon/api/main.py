@@ -18,6 +18,7 @@ import threading
 import sqlite3
 import json
 import tempfile
+import time
 import gc
 
 def keep_alive():
@@ -66,6 +67,16 @@ def init_db():
                     error TEXT
                 )
             """)
+            # Migration: Add columns for queuing if they don't exist
+            try:
+                conn.execute("ALTER TABLE jobs ADD COLUMN input_csv TEXT")
+            except sqlite3.OperationalError:
+                pass
+            try:
+                conn.execute("ALTER TABLE jobs ADD COLUMN n_rows INTEGER")
+            except sqlite3.OperationalError:
+                pass
+
         print(f"Database initialized at {DB_PATH}", file=sys.stderr)
     except Exception as e:
         print(f"FATAL: Database initialization failed: {e}", file=sys.stderr)
@@ -162,6 +173,34 @@ def run_synthesis(job_id: str, df: pd.DataFrame, n_rows: int):
                          (json.dumps([str(e)]), job_id))
             conn.commit()
 
+# ── Queue Worker ──────────────────────────────────────────────────────────────
+def worker_loop():
+    """Continuously checks DB for queued jobs and runs them sequentially."""
+    while True:
+        try:
+            job = None
+            with get_db() as conn:
+                job = conn.execute(
+                    "SELECT job_id, input_csv, n_rows FROM jobs WHERE status = 'queued' ORDER BY rowid ASC LIMIT 1"
+                ).fetchone()
+
+            if job:
+                # Found a job, process it
+                df = pd.read_csv(io.StringIO(job['input_csv']))
+                run_synthesis(job['job_id'], df, job['n_rows'])
+                
+                # Optional: Clear input CSV to save space after processing
+                with get_db() as conn:
+                    conn.execute("UPDATE jobs SET input_csv = NULL WHERE job_id = ?", (job['job_id'],))
+                    conn.commit()
+            else:
+                time.sleep(2) # No jobs, wait before polling again
+        except Exception as e:
+            print(f"Worker error: {e}", file=sys.stderr)
+            time.sleep(5)
+
+threading.Thread(target=worker_loop, daemon=True, name="queue_worker").start()
+
 # ── Submit job ────────────────────────────────────────────────────────────────
 @app.post("/synthesize")
 async def submit_job(
@@ -190,28 +229,22 @@ async def submit_job(
             "errors":  validation['errors']
         })
 
-    # Prevent OOM: Only allow one synthesis job at a time on free tier
-    if any(t.name == 'synthesis_worker' and t.is_alive() for t in threading.enumerate()):
-        raise HTTPException(
-            status_code=429, 
-            detail="Server is busy processing another job. Please try again in a minute."
-        )
-
     # Create job
     job_id = str(uuid.uuid4())[:8]
+    
+    # Convert DF back to CSV string for storage
+    stream = io.StringIO()
+    df.to_csv(stream, index=False)
+    input_csv_str = stream.getvalue()
+
     with get_db() as conn:
-        conn.execute("INSERT INTO jobs (job_id, status) VALUES (?, ?)", (job_id, 'queued'))
+        conn.execute(
+            "INSERT INTO jobs (job_id, status, input_csv, n_rows) VALUES (?, ?, ?, ?)", 
+            (job_id, 'queued', input_csv_str, n_rows or len(df))
+        )
         conn.commit()
 
-    # Run in background thread so request returns immediately
-    n = n_rows or len(df)
-    thread = threading.Thread(
-        target=run_synthesis,
-        args=(job_id, df, n),
-        daemon=True,
-        name='synthesis_worker'
-    )
-    thread.start()
+    # Worker loop will pick it up automatically
 
     return {
         "job_id":     job_id,

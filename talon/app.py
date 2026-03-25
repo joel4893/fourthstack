@@ -200,8 +200,12 @@ if uploaded:
 
             # Update UI
             fake_progress = min(fake_progress + 3, 90)
-            progress_bar.progress(fake_progress)
-            status_text.markdown(f"**Status:** `{status}` — training model...")
+            if status == 'queued':
+                status_text.markdown(f"**Status:** `{status}` — waiting for worker...")
+            else:
+                progress_bar.progress(fake_progress)
+                status_text.markdown(f"**Status:** `{status}` — training model...")
+            
             elapsed_text.caption(f"Elapsed: {elapsed}s")
 
             if status == 'done':
