@@ -104,9 +104,9 @@ if uploaded:
     if st.button("Generate"):
 
         # ── Wake up API first ─────────────────────────────────────────────────
-        with st.spinner("Connecting to API... (waking up free tier instance)"):
+        with st.spinner("Connecting to API... (this may take up to 3 mins on cold start)"):
             api_ready = False
-            for i in range(12):  # Retry for 60 seconds (12 * 5s)
+            for i in range(40):  # Retry for 200 seconds (40 * 5s)
                 try:
                     if requests.get(f"{API_URL}/health", timeout=5).status_code == 200:
                         api_ready = True
@@ -115,7 +115,7 @@ if uploaded:
                     time.sleep(5)
             
             if not api_ready:
-                st.error("API unreachable. The server is likely restarting or compiling. Please wait a minute and try again.")
+                st.error("API unreachable after 3 minutes. The server is likely down or restarting.")
                 st.stop()
 
         # ── Submit job ────────────────────────────────────────────────────────

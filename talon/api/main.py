@@ -186,12 +186,22 @@ def worker_loop():
 
             if job:
                 # Found a job, process it
-                df = pd.read_csv(io.StringIO(job['input_csv']))
-                run_synthesis(job['job_id'], df, job['n_rows'])
+                job_id = job['job_id']
+                n_rows = job['n_rows']
+                csv_str = job['input_csv']
+
+                df = pd.read_csv(io.StringIO(csv_str))
+                
+                # Aggressively free memory before synthesis
+                del csv_str
+                del job
+                gc.collect()
+
+                run_synthesis(job_id, df, n_rows)
                 
                 # Optional: Clear input CSV to save space after processing
                 with get_db() as conn:
-                    conn.execute("UPDATE jobs SET input_csv = NULL WHERE job_id = ?", (job['job_id'],))
+                    conn.execute("UPDATE jobs SET input_csv = NULL WHERE job_id = ?", (job_id,))
                     conn.commit()
             else:
                 time.sleep(2) # No jobs, wait before polling again
