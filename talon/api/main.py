@@ -17,6 +17,7 @@ import uuid
 import threading
 import sqlite3
 import json
+import torch
 import tempfile
 import time
 import gc
@@ -185,6 +186,9 @@ def worker_loop():
                     "SELECT job_id, input_csv, n_rows FROM jobs WHERE status = 'queued' ORDER BY rowid ASC LIMIT 1"
                 ).fetchone()
 
+            # Global torch throttle
+            torch.set_num_threads(1)
+
             if job:
                 # Found a job, process it
                 job_id = job['job_id']
@@ -193,7 +197,7 @@ def worker_loop():
 
                 df = pd.read_csv(io.StringIO(csv_str))
                 
-                # Aggressively free memory before synthesis
+                # Aggressively free memory before training starts
                 del csv_str
                 del job
                 gc.collect()

@@ -10,6 +10,7 @@ from scipy import stats
 from sklearn.preprocessing import QuantileTransformer
 from sdv.metadata import SingleTableMetadata
 from sdv.single_table import CTGANSynthesizer
+import torch
 import warnings
 import gc
 warnings.filterwarnings('ignore')
@@ -22,7 +23,7 @@ REQUIRED_COLUMNS = {
 }
 MIN_ROWS         = 100
 SMOTE_TARGET     = 50
-CTGAN_EPOCHS     = 50
+CTGAN_EPOCHS     = 20
 
 
 # ── Validation ────────────────────────────────────────────────────────────────
@@ -108,13 +109,16 @@ def _train_and_sample(df: pd.DataFrame,
                       n_rows: int,
                       label: str) -> pd.DataFrame:
     """Train a CTGAN on df and generate n_rows synthetic rows."""
+    # Force single-threaded execution to prevent API starvation on 1-core CPU
+    torch.set_num_threads(1)
+
     meta = SingleTableMetadata()
     meta.detect_from_dataframe(df)
     if 'transaction_id' in df.columns:
         meta.update_column(column_name='transaction_id', sdtype='id')
     
-    # batch_size=50 drastically reduces memory usage (default is 500)
-    synth = CTGANSynthesizer(meta, epochs=CTGAN_EPOCHS, verbose=False, batch_size=50)
+    # Very small batch size for 512MB RAM limits
+    synth = CTGANSynthesizer(meta, epochs=CTGAN_EPOCHS, verbose=False, batch_size=20)
     synth.fit(df)
     result = synth.sample(num_rows=n_rows)
     del synth

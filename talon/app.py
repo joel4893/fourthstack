@@ -93,11 +93,12 @@ if uploaded:
     st.divider()
     st.subheader("Generate synthetic data")
 
+    # Cap rows to 1000 to prevent OOM/Timeouts on free tier
     n_rows = st.slider(
         "How many synthetic rows?",
         min_value=100,
-        max_value=max(1000, len(df)),
-        value=len(df),
+        max_value=1000,
+        value=min(len(df), 1000),
         step=50
     )
 
@@ -145,7 +146,7 @@ if uploaded:
         elapsed_text = st.empty()
 
         start     = time.time()
-        max_wait  = 600
+        max_wait  = 900  # 15 minutes
         poll_interval = 5
         fake_progress = 0
 
@@ -231,7 +232,7 @@ if uploaded:
                 st.stop()
 
             elif elapsed > max_wait:
-                st.error("Timed out after 10 minutes. Try a smaller dataset.")
+                st.error("Timed out after 15 minutes. The server is under extreme load.")
                 st.stop()
 
             time.sleep(poll_interval)
