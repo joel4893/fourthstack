@@ -10,8 +10,10 @@ GET  /sample        → sample CSV download
 from fastapi import FastAPI, UploadFile, File, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from google.oauth2 import id_token
-from google.auth.transport import requests as google_requests
+from google.auth.transport import requests as google_auth_requests
+import urllib.request
 import pandas as pd
+import numpy as np
 import io
 import sys
 import os
@@ -28,11 +30,13 @@ import resource
 import gc
 import traceback
 
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from core.synthesizer import synthesize, validate_dataframe
+
 GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID")
 
 def keep_alive():
     """Ping own health endpoint to prevent Render spin-down."""
-    import urllib.request
     # Use the environment URL if available, fallback to hardcoded only as last resort
     url = os.environ.get("TALON_API_URL", "https://talon-api-uvs9.onrender.com") + "/health"
     while True:
@@ -48,8 +52,6 @@ def keep_alive():
 # You can set RENDER_INSTANCE_TYPE in your Render env vars.
 if os.environ.get("RENDER") and os.environ.get("RENDER_INSTANCE_TYPE", "free") == "free":
     threading.Thread(target=keep_alive, daemon=True).start()
-
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 app = FastAPI(
     title="Talon",
@@ -163,7 +165,7 @@ async def auth_google(request: Request):
     
     try:
         # Verify the Google Token
-        idinfo = id_token.verify_oauth2_token(token, google_requests.Request(), GOOGLE_CLIENT_ID)
+        idinfo = id_token.verify_oauth2_token(token, google_auth_requests.Request(), GOOGLE_CLIENT_ID, clock_skew_in_seconds=10)
         
         email = idinfo['email']
         name = idinfo.get('name')
@@ -220,7 +222,6 @@ def get_analytics():
 # ── Sample CSV ────────────────────────────────────────────────────────────────
 @app.get("/sample")
 def sample():
-    import numpy as np
     np.random.seed(99)
     n = 200
 
@@ -264,7 +265,6 @@ def sample():
 def run_synthesis(job_id: str, df: pd.DataFrame, n_rows: int):
     """Runs in background thread. Updates jobs dict when done."""
     try:
-        from core.synthesizer import synthesize
         with get_db() as conn:
             conn.execute("UPDATE jobs SET status = 'running' WHERE job_id = ?", (job_id,))
             conn.commit()
@@ -360,7 +360,6 @@ async def submit_job(
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Could not read CSV: {str(e)}")
 
-    from core.synthesizer import validate_dataframe
     validation = validate_dataframe(df)
     if not validation['valid']:
         raise HTTPException(status_code=422, detail={

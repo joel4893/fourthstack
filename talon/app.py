@@ -50,11 +50,9 @@ def login_sidebar():
             <script src="https://accounts.google.com/gsi/client" async defer></script>
             <script>
                 function handleCredentialResponse(response) {{
-                    const data = {{ token: response.credential }};
-                    window.parent.postMessage({{
-                        type: 'streamlit:set_user',
-                        token: response.credential
-                    }}, '*');
+                    const url = new URL(window.parent.location.href);
+                    url.searchParams.set('token', response.credential);
+                    window.parent.location.href = url.toString();
                 }}
             </script>
         """
