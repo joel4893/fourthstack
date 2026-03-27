@@ -16,6 +16,8 @@ import os
 import uuid
 import threading
 import sqlite3
+# In a production-ready version, we'd replace the local thread/sqlite
+# with Celery + Redis and PostgreSQL to handle horizontal scaling.
 import json
 import torch
 import tempfile

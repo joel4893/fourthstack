@@ -10,6 +10,7 @@ from scipy import stats
 from sklearn.preprocessing import QuantileTransformer
 from sdv.metadata import SingleTableMetadata
 from sdv.single_table import CTGANSynthesizer
+import torch.nn as nn
 import torch
 import warnings
 import gc
@@ -104,6 +105,45 @@ def _smote(minority_df: pd.DataFrame,
     )
 
 
+# ── Custom Architecture (The Moat) ────────────────────────────────────────────
+class TalonGenerator(nn.Module):
+    """
+    A custom Residual MLP Generator. 
+    By building this in-house, we can implement custom Loss functions
+    that prioritize Amount KS scores over standard GAN loss.
+    """
+    def __init__(self, input_dim, output_dim):
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Linear(input_dim, 256),
+            nn.ReLU(),
+            nn.Linear(256, 512),
+            nn.ReLU(),
+            nn.Linear(512, 256),
+            nn.ReLU(),
+            nn.Linear(256, output_dim)
+        )
+
+    def forward(self, z):
+        return self.net(z)
+
+def _train_custom_model(df: pd.DataFrame, n_rows: int) -> pd.DataFrame:
+    """
+    Placeholder for the internal Talon synthesis engine.
+    This is where you train on the data (or the SDV-generated data)
+    to create a proprietary weights file.
+    """
+    # For now, we'll implement the logic to handle the transition
+    # In a full implementation, this would involve a training loop:
+    # 1. Convert DF to Tensors
+    # 2. Train TalonGenerator (Student) to match DF distributions (Teacher)
+    # 3. Sample from TalonGenerator
+    
+    # For the MVP, we return an empty DF or keep using SDV until 
+    # the custom training loop is finalized.
+    raise NotImplementedError("Custom Talon Engine is in training phase.")
+
+
 # ── Core synthesis ────────────────────────────────────────────────────────────
 def _train_and_sample(df: pd.DataFrame,
                       n_rows: int,
@@ -116,6 +156,10 @@ def _train_and_sample(df: pd.DataFrame,
     meta.detect_from_dataframe(df)
     if 'transaction_id' in df.columns:
         meta.update_column(column_name='transaction_id', sdtype='id')
+    
+    # PROPRIETARY UPGRADE PATH:
+    # If we have a pre-trained internal model that matches fidelity,
+    # we swap out CTGANSynthesizer here.
     
     # Very small batch size for 512MB RAM limits
     synth = CTGANSynthesizer(meta, epochs=CTGAN_EPOCHS, verbose=False, batch_size=20)
