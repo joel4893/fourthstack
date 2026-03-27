@@ -25,20 +25,21 @@ import time
 import gc
 
 def keep_alive():
-    """Ping own health endpoint every 5 mins to prevent Render spin-down."""
-    import time
+    """Ping own health endpoint to prevent Render spin-down."""
     import urllib.request
+    # Use the environment URL if available, fallback to hardcoded only as last resort
+    url = os.environ.get("TALON_API_URL", "https://talon-api-uvs9.onrender.com") + "/health"
     while True:
         time.sleep(270)
         try:
-            urllib.request.urlopen(
-                "https://talon-api-uvs9.onrender.com/health",
-                timeout=10
-            )
+            print(f"[*] Keep-alive: Pinging {url}", file=sys.stderr)
+            urllib.request.urlopen(url, timeout=10)
         except Exception:
             pass
 
-threading.Thread(target=keep_alive, daemon=True).start()
+# Only start keep_alive if we're likely on Render
+if os.environ.get("RENDER"):
+    threading.Thread(target=keep_alive, daemon=True).start()
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -87,6 +88,15 @@ def init_db():
         raise e
 
 init_db()
+
+# ── Root ──────────────────────────────────────────────────────────────────────
+@app.get("/")
+def root():
+    return {
+        "message": "Welcome to the Talon API",
+        "docs": "/docs",
+        "health": "/health"
+    }
 
 # ── Health ────────────────────────────────────────────────────────────────────
 @app.get("/health")
@@ -193,6 +203,7 @@ def worker_loop():
 
             if job:
                 # Found a job, process it
+                print(f"[*] Queue Worker: Picking up job {job['job_id']}", file=sys.stderr)
                 job_id = job['job_id']
                 n_rows = job['n_rows']
                 csv_str = job['input_csv']

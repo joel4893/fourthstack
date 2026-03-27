@@ -6,3 +6,4 @@ scikit-learn
 fastapi
 uvicorn
 python-multipart
+torch

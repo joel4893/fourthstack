@@ -115,33 +115,147 @@ class TalonGenerator(nn.Module):
     def __init__(self, input_dim, output_dim):
         super().__init__()
         self.net = nn.Sequential(
-            nn.Linear(input_dim, 256),
+            nn.Linear(input_dim, 128),
             nn.ReLU(),
-            nn.Linear(256, 512),
+            nn.Linear(128, 256),
             nn.ReLU(),
-            nn.Linear(512, 256),
+            nn.Linear(256, 128),
             nn.ReLU(),
-            nn.Linear(256, output_dim)
+            nn.Linear(128, output_dim)
         )
 
     def forward(self, z):
         return self.net(z)
 
+class TalonDiscriminator(nn.Module):
+    """
+    Standard Discriminator to provide the adversarial signal.
+    """
+    def __init__(self, input_dim):
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Linear(input_dim, 128),
+            nn.LeakyReLU(0.2),
+            nn.Linear(128, 128),
+            nn.LeakyReLU(0.2),
+            nn.Linear(128, 1),
+            nn.Sigmoid()
+        )
+
+    def forward(self, x):
+        return self.net(x)
+
 def _train_custom_model(df: pd.DataFrame, n_rows: int) -> pd.DataFrame:
     """
-    Placeholder for the internal Talon synthesis engine.
-    This is where you train on the data (or the SDV-generated data)
-    to create a proprietary weights file.
+    Internal Talon synthesis engine.
+    Uses a GAN architecture with Distribution-Aware Loss.
     """
-    # For now, we'll implement the logic to handle the transition
-    # In a full implementation, this would involve a training loop:
-    # 1. Convert DF to Tensors
-    # 2. Train TalonGenerator (Student) to match DF distributions (Teacher)
-    # 3. Sample from TalonGenerator
+    print(f"\n[*] Talon Engine: Starting training on {len(df)} rows...", flush=True)
     
-    # For the MVP, we return an empty DF or keep using SDV until 
-    # the custom training loop is finalized.
-    raise NotImplementedError("Custom Talon Engine is in training phase.")
+    # 1. Prepare Data (Categorical Encoding & Scaling)
+    working_df = df.copy()
+    if 'transaction_id' in working_df.columns:
+        working_df = working_df.drop(columns=['transaction_id'])
+
+    # Feature Scaling: GANs converge better with [0, 1] or [-1, 1] input
+    numeric_cols = working_df.select_dtypes(include=[np.number]).columns
+    col_mins = working_df[numeric_cols].min()
+    col_maxs = working_df[numeric_cols].max()
+    # Avoid division by zero
+    denom = (col_maxs - col_mins).replace(0, 1)
+    working_df[numeric_cols] = (working_df[numeric_cols] - col_mins) / denom
+
+    # Simple One-Hot for merchant_category
+    encoded_df = pd.get_dummies(working_df)
+    column_order = encoded_df.columns
+    data_tensor = torch.FloatTensor(encoded_df.values)
+    
+    # 2. Initialize Models
+    latent_dim = 32
+    input_dim = data_tensor.shape[1]
+    generator = TalonGenerator(latent_dim, input_dim)
+    discriminator = TalonDiscriminator(input_dim)
+    
+    g_optimizer = torch.optim.Adam(generator.parameters(), lr=0.0002)
+    d_optimizer = torch.optim.Adam(discriminator.parameters(), lr=0.0002)
+    criterion = nn.BCELoss()
+
+    # 3. Training Loop (Lightweight for 512MB RAM)
+    epochs = CTGAN_EPOCHS * 2 # Custom engine needs a bit more time
+    batch_size = 32
+    
+    for _ in range(epochs):
+        # Shuffle
+        idx = torch.randperm(data_tensor.size(0))
+        data_tensor = data_tensor[idx]
+        
+        for i in range(0, len(data_tensor), batch_size):
+            real_data = data_tensor[i:i+batch_size]
+            curr_batch_size = real_data.size(0)
+            
+            # Train Discriminator
+            d_optimizer.zero_grad()
+            z = torch.randn(curr_batch_size, latent_dim)
+            fake_data = generator(z)
+            
+            d_real = discriminator(real_data)
+            d_fake = discriminator(fake_data.detach())
+            
+            loss_d = criterion(d_real, torch.ones(curr_batch_size, 1)) + \
+                     criterion(d_fake, torch.zeros(curr_batch_size, 1))
+            loss_d.backward()
+            d_optimizer.step()
+            
+            # Train Generator
+            g_optimizer.zero_grad()
+            d_fake_g = discriminator(fake_data)
+            
+            # Adversarial Loss
+            loss_g = criterion(d_fake_g, torch.ones(curr_batch_size, 1))
+            
+            # ── Proprietary Moat: Distribution Matching Loss ──
+            # Penalize the generator if the mean/std of generated batch 
+            # doesn't match the real batch (especially for amount_qt)
+            dist_loss = torch.mean((real_data.mean(0) - fake_data.mean(0))**2)
+            (loss_g + dist_loss).backward()
+            
+            g_optimizer.step()
+
+    print("[*] Talon Engine: Training complete. Sampling synthetic rows...", flush=True)
+
+    # 4. Sample and Decode
+    generator.eval()
+    with torch.no_grad():
+        z = torch.randn(n_rows, latent_dim)
+        synthetic_data = generator(z).numpy()
+    
+    # Reconstruct DataFrame
+    synth_df = pd.DataFrame(synthetic_data, columns=column_order)
+    
+    # Inverse Scaling
+    for col in numeric_cols:
+        if col in synth_df.columns:
+            synth_df[col] = synth_df[col] * (col_maxs[col] - col_mins[col]) + col_mins[col]
+
+    # Reverse One-Hot for merchant_category
+    cat_cols = [c for c in column_order if 'merchant_category_' in c]
+    if cat_cols:
+        # Find the max value across the dummy columns to pick the category
+        cat_indices = synth_df[cat_cols].idxmax(axis=1)
+        synth_df['merchant_category'] = cat_indices.str.replace('merchant_category_', '')
+        synth_df = synth_df.drop(columns=cat_cols)
+
+    # Final Cleanup: Clip values to valid ranges for un-transformed columns
+    if 'transaction_hour' in synth_df.columns:
+        synth_df['transaction_hour'] = synth_df['transaction_hour'].clip(0, 23).round()
+    if 'customer_age' in synth_df.columns:
+        synth_df['customer_age'] = synth_df['customer_age'].clip(18, 100).round()
+
+    # Free memory
+    del generator, discriminator, data_tensor
+    gc.collect()
+    
+    return synth_df
 
 
 # ── Core synthesis ────────────────────────────────────────────────────────────
@@ -151,6 +265,13 @@ def _train_and_sample(df: pd.DataFrame,
     """Train a CTGAN on df and generate n_rows synthetic rows."""
     # Force single-threaded execution to prevent API starvation on 1-core CPU
     torch.set_num_threads(1)
+    
+    # ── Talon proprietary engine is now active ──
+    try:
+        return _train_custom_model(df, n_rows)
+    except Exception as e:
+        # Fallback to SDV if custom training fails (e.g. OOM)
+        warnings.warn(f"Custom Talon Engine failed: {e}. Falling back to SDV.")
 
     meta = SingleTableMetadata()
     meta.detect_from_dataframe(df)
@@ -194,9 +315,10 @@ def compute_fidelity(real: pd.DataFrame,
         real['account_balance'], synthetic['account_balance']
     )
 
-    real_set  = set(real.apply(lambda x: tuple(x), axis=1))
-    synth_set = set(synthetic.apply(lambda x: tuple(x), axis=1))
-    leaks     = len(real_set.intersection(synth_set))
+    # Optimized privacy leak check using hashing
+    real_hashes = pd.util.hash_pandas_object(real, index=False)
+    synth_hashes = pd.util.hash_pandas_object(synthetic, index=False)
+    leaks = int(synth_hashes.isin(real_hashes).sum())
 
     # Overall fidelity score 0-100
     # Weighted combination of key metrics

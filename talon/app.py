@@ -32,7 +32,10 @@ if st.button("Test API connectivity"):
         except Exception:
             st.text(resp.text)
     except Exception as e:
-        st.error(f"Connectivity test failed: {e}")
+        st.error(f"Connectivity test failed.")
+        st.info(f"Make sure the backend is running at {API_URL}")
+        with st.expander("Error details"):
+            st.code(str(e))
 
 # ── Sidebar ───────────────────────────────────────────────────────────────────
 with st.sidebar:
@@ -52,6 +55,10 @@ with st.sidebar:
     - `customer_age`
     - `account_balance`
     """)
+    st.divider()
+    st.design_attr = st.toggle("Debug Mode", value=False)
+    if st.design_attr:
+        st.write(f"**Target API:** `{API_URL}`")
     st.divider()
     st.caption("Talon — Built with SDV + CTGAN")
 

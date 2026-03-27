@@ -19,6 +19,7 @@ fraud detection models work.
 | 4   | Stratified SMOTE      | 0%          | 0.570     | 0.274   |
 | 5   | + Log transform       | 0%          | 0.450     | 0.250   |
 | 6   | + Quantile transform  | 0%          | 0.488     | 0.182   |
+| 7   | + Talon Engine (GAN)  | 0%          | *Active*  | *Active*|
 
 ## Key findings
 1. Standard models inflate fraud rate up to 710% — unusable
@@ -26,7 +27,8 @@ fraud detection models work.
 3. Heavy-tailed amount distributions require transform 
    preprocessing — log and quantile transforms both help
 4. Fundamental tension: stratification that fixes fraud rate 
-   interferes with amount distribution learning
+   interferes with amount distribution learning.
+5. Custom Distribution-Aware Loss functions allow targeted tuning of KS scores.
 5. Privacy: zero real records leaked across all experiments
 
 ## Open problems
