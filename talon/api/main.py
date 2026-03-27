@@ -7,7 +7,7 @@ GET  /health        → status check
 GET  /sample        → sample CSV download
 """
 
-from fastapi import FastAPI, UploadFile, File, HTTPException
+from fastapi import FastAPI, UploadFile, File, HTTPException, Request
 from fastapi.responses import StreamingResponse
 import pandas as pd
 import io
@@ -22,7 +22,9 @@ import json
 import torch
 import tempfile
 import time
+import resource
 import gc
+import traceback
 
 def keep_alive():
     """Ping own health endpoint to prevent Render spin-down."""
@@ -50,6 +52,19 @@ app = FastAPI(
     description="High-fidelity synthetic financial data. Zero PII.",
     version="0.2.0"
 )
+
+# ── Observability Middleware ──────────────────────────────────────────────────
+@app.middleware("http")
+async def log_request_metrics(request: Request, call_next):
+    start_time = time.time()
+    response = await call_next(request)
+    process_time = time.time() - start_time
+    
+    # Log time per request and failure status
+    log_msg = f"[*] {request.method} {request.url.path} | Status: {response.status_code} | Time: {process_time:.4f}s"
+    print(log_msg, file=sys.stderr)
+    
+    return response
 
 # ── Persistent job store (SQLite) ─────────────────────────────────────────────
 DB_PATH = os.path.join(tempfile.gettempdir(), "jobs.db")
@@ -188,6 +203,7 @@ def run_synthesis(job_id: str, df: pd.DataFrame, n_rows: int):
             conn.execute("UPDATE jobs SET status = 'failed', error = ? WHERE job_id = ?",
                          (json.dumps([str(e)]), job_id))
             conn.commit()
+        print(f"[!] Synthesis Failure at point: {traceback.format_exc()}", file=sys.stderr)
 
 # ── Queue Worker ──────────────────────────────────────────────────────────────
 def worker_loop():
@@ -205,7 +221,8 @@ def worker_loop():
 
             if job:
                 # Found a job, process it
-                print(f"[*] Queue Worker: Picking up job {job['job_id']}", file=sys.stderr)
+                mem_usage = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024
+                print(f"[*] Worker: Processing job {job['job_id']} (System RAM: {mem_usage:.2f}MB)", file=sys.stderr)
                 job_id = job['job_id']
                 n_rows = job['n_rows']
                 csv_str = job['input_csv']

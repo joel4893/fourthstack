@@ -113,18 +113,20 @@ if uploaded:
     if st.button("Generate"):
 
         # ── Wake up API first ─────────────────────────────────────────────────
-        with st.spinner("Connecting to API... (this may take up to 3 mins on cold start)"):
+        with st.spinner("Waking up Talon Inference Engine..."):
             api_ready = False
-            for i in range(40):  # Retry for 200 seconds (40 * 5s)
+            for _ in range(40):  # Retry for 200 seconds (40 * 5s)
                 try:
-                    if requests.get(f"{API_URL}/health", timeout=5).status_code == 200:
+                    resp = requests.get(f"{API_URL}/health", timeout=5)
+                    if resp.status_code == 200:
                         api_ready = True
                         break
-                except Exception:
-                    time.sleep(5)
+                except:
+                    pass
+                time.sleep(5)
             
             if not api_ready:
-                st.error("API unreachable after 3 minutes. The server is likely down or restarting.")
+                st.error("API failed to wake up. Please check if the backend is running.")
                 st.stop()
 
         # ── Submit job ────────────────────────────────────────────────────────
@@ -149,7 +151,7 @@ if uploaded:
             st.stop()
 
         # ── Poll for completion ───────────────────────────────────────────────
-        progress_bar = st.progress(0)
+        progress_bar = st.progress(10)
         status_text  = st.empty()
         elapsed_text = st.empty()
 
@@ -217,12 +219,12 @@ if uploaded:
                 continue
 
             # Update UI
-            fake_progress = min(fake_progress + 3, 90)
+            fake_progress = min(fake_progress + 20, 95)
             if status == 'queued':
-                status_text.markdown(f"**Status:** `{status}` — waiting for worker...")
+                status_text.markdown(f"**Status:** `queued` — Preparing dataset...")
             else:
                 progress_bar.progress(fake_progress)
-                status_text.markdown(f"**Status:** `{status}` — training model...")
+                status_text.markdown(f"**Status:** `running` — Running Talon Inference...")
             
             elapsed_text.caption(f"Elapsed: {elapsed}s")
 
