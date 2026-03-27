@@ -35,6 +35,10 @@ st.divider()
 
 # ── Login Logic ───────────────────────────────────────────────────────────────
 def login_sidebar():
+    if not GOOGLE_CLIENT_ID:
+        st.sidebar.error("Google Client ID missing. Set GOOGLE_CLIENT_ID in environment variables.")
+        return
+
     if 'user' not in st.session_state:
         st.subheader("🔑 Access Talon")
         # Google Sign-In HTML/JS snippet

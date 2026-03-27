@@ -162,11 +162,15 @@ def health():
 async def auth_google(request: Request):
     data = await request.json()
     token = data.get("token")
-    
+
+    if not GOOGLE_CLIENT_ID:
+        print("[!] Auth Error: GOOGLE_CLIENT_ID environment variable is not set", file=sys.stderr)
+        raise HTTPException(status_code=500, detail="Server configuration error")
+
     try:
         # Verify the Google Token
         idinfo = id_token.verify_oauth2_token(token, google_auth_requests.Request(), GOOGLE_CLIENT_ID, clock_skew_in_seconds=10)
-        
+
         email = idinfo['email']
         name = idinfo.get('name')
         picture = idinfo.get('picture')
@@ -181,7 +185,7 @@ async def auth_google(request: Request):
 
         return {"status": "success", "user": {"email": email, "name": name, "picture": picture}}
     except Exception as e:
-        print(f"[!] Auth Error: {e}", file=sys.stderr)
+        print(f"[!] Auth Error: {traceback.format_exc()}", file=sys.stderr)
         raise HTTPException(status_code=401, detail="Invalid Google Token")
 
 # ── Analytics & Feedback ──────────────────────────────────────────────────────
