@@ -37,8 +37,10 @@ def keep_alive():
         except Exception:
             pass
 
-# Only start keep_alive if we're likely on Render
-if os.environ.get("RENDER"):
+# Only start keep_alive if we're on Render Free Tier.
+# Paid plans (Starter/Standard) don't need this as they stay awake.
+# You can set RENDER_INSTANCE_TYPE in your Render env vars.
+if os.environ.get("RENDER") and os.environ.get("RENDER_INSTANCE_TYPE", "free") == "free":
     threading.Thread(target=keep_alive, daemon=True).start()
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))

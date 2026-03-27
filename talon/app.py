@@ -25,7 +25,8 @@ st.divider()
 
 if st.button("Test API connectivity"):
     try:
-        resp = requests.get(f"{API_URL}/health", timeout=10)
+        # Increased timeout to 60s to handle Render free-tier cold starts
+        resp = requests.get(f"{API_URL}/health", timeout=60)
         st.success(f"/health returned {resp.status_code}")
         try:
             st.json(resp.json())
@@ -66,7 +67,7 @@ with st.sidebar:
 st.subheader("Don't have a CSV?")
 if st.button("Download sample transaction data"):
     try:
-        r = requests.get(f"{API_URL}/sample", timeout=30)
+        r = requests.get(f"{API_URL}/sample", timeout=60)
         st.download_button(
             label="Save sample_transactions.csv",
             data=r.content,
