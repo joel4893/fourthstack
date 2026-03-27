@@ -117,7 +117,7 @@ def _talon_inference_engine(df: pd.DataFrame, n_rows: int) -> pd.DataFrame:
     """
     start_time = time.time()
     mem_before = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024
-    print(f"[*] Talon Engine: Starting inference for {n_rows} rows (RAM: {mem_before:.2f}MB)", flush=True)
+    print(f"[*] Talon Engine: Starting Product-Mode inference for {n_rows} rows (RAM: {mem_before:.2f}MB)", flush=True)
     
     working_df = df.copy()
     if 'transaction_id' in working_df.columns:

@@ -9,6 +9,8 @@ GET  /sample        → sample CSV download
 
 from fastapi import FastAPI, UploadFile, File, HTTPException, Request
 from fastapi.responses import StreamingResponse
+from google.oauth2 import id_token
+from google.auth.transport import requests as google_requests
 import pandas as pd
 import io
 import sys
@@ -25,6 +27,8 @@ import time
 import resource
 import gc
 import traceback
+
+GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID")
 
 def keep_alive():
     """Ping own health endpoint to prevent Render spin-down."""
@@ -98,6 +102,31 @@ def init_db():
                 conn.execute("ALTER TABLE jobs ADD COLUMN n_rows INTEGER")
             except sqlite3.OperationalError:
                 pass
+                
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS users (
+                    email TEXT PRIMARY KEY,
+                    name TEXT,
+                    picture TEXT,
+                    last_login DATETIME DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            # Analytics and Feedback tables
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS visits (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    user_agent TEXT
+                )
+            """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS feedback (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    email TEXT,
+                    message TEXT
+                )
+            """)
 
         print(f"Database initialized at {DB_PATH}", file=sys.stderr)
     except Exception as e:
@@ -124,6 +153,68 @@ def health():
         "status": "ok",
         "version": "0.2.0",
         "active_jobs": active_count
+    }
+
+# ── Auth ──────────────────────────────────────────────────────────────────────
+@app.post("/auth/google")
+async def auth_google(request: Request):
+    data = await request.json()
+    token = data.get("token")
+    
+    try:
+        # Verify the Google Token
+        idinfo = id_token.verify_oauth2_token(token, google_requests.Request(), GOOGLE_CLIENT_ID)
+        
+        email = idinfo['email']
+        name = idinfo.get('name')
+        picture = idinfo.get('picture')
+
+        with get_db() as conn:
+            conn.execute("""
+                INSERT INTO users (email, name, picture, last_login) 
+                VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+                ON CONFLICT(email) DO UPDATE SET last_login=CURRENT_TIMESTAMP, name=?, picture=?
+            """, (email, name, picture, name, picture))
+            conn.commit()
+
+        return {"status": "success", "user": {"email": email, "name": name, "picture": picture}}
+    except Exception as e:
+        print(f"[!] Auth Error: {e}", file=sys.stderr)
+        raise HTTPException(status_code=401, detail="Invalid Google Token")
+
+# ── Analytics & Feedback ──────────────────────────────────────────────────────
+@app.post("/visit")
+def record_visit(request: Request):
+    user_agent = request.headers.get("user-agent")
+    with get_db() as conn:
+        conn.execute("INSERT INTO visits (user_agent) VALUES (?)", (user_agent,))
+        conn.commit()
+    return {"status": "recorded"}
+
+@app.post("/feedback")
+async def submit_feedback(request: Request):
+    data = await request.json()
+    email = data.get("email")
+    message = data.get("message")
+    with get_db() as conn:
+        conn.execute("INSERT INTO feedback (email, message) VALUES (?, ?)", (email, message))
+        conn.commit()
+    return {"status": "thank you"}
+
+@app.get("/analytics")
+def get_analytics():
+    """Internal endpoint to check usage."""
+    with get_db() as conn:
+        visits = conn.execute("SELECT COUNT(*) FROM visits").fetchone()[0]
+        jobs = conn.execute("SELECT COUNT(*) FROM jobs").fetchone()[0]
+        users_list = conn.execute("SELECT email, name, last_login FROM users ORDER BY last_login DESC").fetchall()
+        feedback = conn.execute("SELECT * FROM feedback ORDER BY timestamp DESC").fetchall()
+        
+    return {
+        "total_visits": visits,
+        "total_jobs_submitted": jobs,
+        "registered_users": [dict(u) for u in users_list],
+        "feedback_entries": [dict(f) for f in feedback]
     }
 
 # ── Sample CSV ────────────────────────────────────────────────────────────────
@@ -204,6 +295,11 @@ def run_synthesis(job_id: str, df: pd.DataFrame, n_rows: int):
                          (json.dumps([str(e)]), job_id))
             conn.commit()
         print(f"[!] Synthesis Failure at point: {traceback.format_exc()}", file=sys.stderr)
+    finally:
+        # Ensure input CSV is cleared even on failure to save space
+        with get_db() as conn:
+            conn.execute("UPDATE jobs SET input_csv = NULL WHERE job_id = ?", (job_id,))
+            conn.commit()
 
 # ── Queue Worker ──────────────────────────────────────────────────────────────
 def worker_loop():
@@ -236,10 +332,6 @@ def worker_loop():
 
                 run_synthesis(job_id, df, n_rows)
                 
-                # Optional: Clear input CSV to save space after processing
-                with get_db() as conn:
-                    conn.execute("UPDATE jobs SET input_csv = NULL WHERE job_id = ?", (job_id,))
-                    conn.commit()
             else:
                 time.sleep(2) # No jobs, wait before polling again
         except Exception as e:

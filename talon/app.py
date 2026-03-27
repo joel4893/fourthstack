@@ -6,11 +6,13 @@ Upload real transaction CSV → get synthetic data + fidelity report
 import streamlit as st
 import pandas as pd
 import requests
+import streamlit.components.v1 as components
 import time
 import os
 
 # Resolve API URL from environment (set TALON_API_URL in deployment/secrets)
 API_URL = os.environ.get("TALON_API_URL", "https://talon-api-uvs9.onrender.com")
+GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID")
 
 st.set_page_config(
     page_title="Talon",
@@ -18,10 +20,60 @@ st.set_page_config(
     layout="centered"
 )
 
+# ── Track Visit ───────────────────────────────────────────────────────────────
+if 'visited' not in st.session_state:
+    try:
+        requests.post(f"{API_URL}/visit", timeout=5)
+        st.session_state.visited = True
+    except:
+        pass
+
 # ── Header ────────────────────────────────────────────────────────────────────
 st.title("⬡ Talon")
 st.caption("High-fidelity synthetic financial data. Zero PII.")
 st.divider()
+
+# ── Login Logic ───────────────────────────────────────────────────────────────
+def login_sidebar():
+    if 'user' not in st.session_state:
+        st.subheader("🔑 Access Talon")
+        # Google Sign-In HTML/JS snippet
+        html_code = f"""
+            <div id="g_id_onload"
+                 data-client_id="{GOOGLE_CLIENT_ID}"
+                 data-context="signin"
+                 data-ux_mode="popup"
+                 data-callback="handleCredentialResponse"
+                 data-auto_prompt="false">
+            </div>
+            <div class="g_id_signin" data-type="standard"></div>
+            <script src="https://accounts.google.com/gsi/client" async defer></script>
+            <script>
+                function handleCredentialResponse(response) {{
+                    const data = {{ token: response.credential }};
+                    window.parent.postMessage({{
+                        type: 'streamlit:set_user',
+                        token: response.credential
+                    }}, '*');
+                }}
+            </script>
+        """
+        components.html(html_code, height=70)
+
+        # Logic to handle the token if passed via URL (simplified callback)
+        token = st.query_params.get("token")
+        if token:
+            resp = requests.post(f"{API_URL}/auth/google", json={"token": token})
+            if resp.status_code == 200:
+                st.session_state.user = resp.json()['user']
+                st.query_params.clear()
+                st.rerun()
+    else:
+        user = st.session_state.user
+        st.sidebar.success(f"Logged in as {user['name']}")
+        if st.sidebar.button("Logout"):
+            del st.session_state.user
+            st.rerun()
 
 if st.button("Test API connectivity"):
     try:
@@ -40,6 +92,8 @@ if st.button("Test API connectivity"):
 
 # ── Sidebar ───────────────────────────────────────────────────────────────────
 with st.sidebar:
+    login_sidebar()
+    st.divider()
     st.header("How it works")
     st.markdown("""
     1. Upload your real transaction CSV
@@ -56,6 +110,27 @@ with st.sidebar:
     - `customer_age`
     - `account_balance`
     """)
+    
+    st.divider()
+    st.subheader("💬 Talk to the Founder")
+    with st.form("feedback_form", clear_on_submit=True):
+        default_email = st.session_state.user['email'] if 'user' in st.session_state else ""
+        user_email = st.text_input("Email", value=default_email, placeholder="How can I reach you?")
+        user_msg = st.text_area("Feedback", placeholder="Would you pay for this? What's missing?")
+        submitted = st.form_submit_button("Send to Talon Team")
+        
+        if submitted:
+            if user_msg:
+                try:
+                    requests.post(f"{API_URL}/feedback", 
+                                  json={"email": user_email, "message": user_msg}, 
+                                  timeout=5)
+                    st.success("Thanks! I'll read this today.")
+                except:
+                    st.error("Couldn't send feedback. API down?")
+            else:
+                st.warning("Please enter a message.")
+
     st.divider()
     st.design_attr = st.toggle("Debug Mode", value=False)
     if st.design_attr:
@@ -290,14 +365,17 @@ if uploaded:
         try:
             r_csv = requests.get(
                 f"{API_URL}/result/{job_id}",
-                timeout=30
+                timeout=60
             )
-            st.download_button(
-                label="Download synthetic_transactions.csv",
-                data=r_csv.content,
-                file_name="synthetic_transactions.csv",
-                mime="text/csv",
-                width="stretch"
-            )
+            if r_csv.status_code == 200:
+                st.download_button(
+                    label="Download synthetic_transactions.csv",
+                    data=r_csv.content,
+                    file_name="synthetic_transactions.csv",
+                    mime="text/csv",
+                    use_container_width=True
+                )
+            else:
+                st.error("Result found but could not be downloaded. Please try again.")
         except Exception:
             st.warning("Refresh to download — result is ready on the server.")
