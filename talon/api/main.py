@@ -7,13 +7,7 @@ GET  /health        → status check
 GET  /sample        → sample CSV download
 """
 
-from fastapi import FastAPI, UploadFile, File, HTTPException, Request
-from fastapi.responses import StreamingResponse
-from google.oauth2 import id_token
-from google.auth.transport import requests as google_auth_requests
 import urllib.request
-import pandas as pd
-import numpy as np
 import io
 import sys
 import os
@@ -29,6 +23,14 @@ import time
 import resource
 import gc
 import traceback
+
+from fastapi import FastAPI, UploadFile, File, HTTPException, Request
+from fastapi.responses import StreamingResponse
+from google.oauth2 import id_token
+from google.auth.transport import requests as google_auth_requests
+import pandas as pd
+import numpy as np
+import torch
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from core.synthesizer import synthesize, validate_dataframe

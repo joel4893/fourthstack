@@ -56,12 +56,18 @@ def login_sidebar():
             <script>
                 function handleCredentialResponse(response) {{
                     try {{
-                        const url = new URL(window.parent.location.href);
+                        // Use window.location if window.parent is restricted
+                        const targetWindow = window.parent || window;
+                        const url = new URL(targetWindow.location.href);
+                        
                         url.searchParams.set('token', response.credential);
-                        window.parent.location.href = url.toString();
+                        targetWindow.location.href = url.toString();
                     }} catch (e) {{
                         console.error("Auth redirect failed:", e);
-                        alert("Please ensure third-party cookies are enabled or try a non-incognito window.");
+                        // Fallback: update own location if parent is inaccessible
+                        const url = new URL(window.location.href);
+                        url.searchParams.set('token', response.credential);
+                        window.location.href = url.toString();
                     }}
                 }}
             </script>
@@ -71,7 +77,7 @@ def login_sidebar():
         # Logic to handle the token if passed via URL (simplified callback)
         token = st.query_params.get("token")
         if token:
-            resp = requests.post(f"{API_URL}/auth/google", json={"token": token})
+            resp = requests.post(f"{API_URL}/auth/google", json={"token": token}, timeout=15)
             if resp.status_code == 200:
                 st.session_state.user = resp.json()['user']
                 st.query_params.clear()
