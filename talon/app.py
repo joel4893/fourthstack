@@ -49,26 +49,20 @@ def login_sidebar():
                  data-ux_mode="popup"
                  data-callback="handleCredentialResponse"
                  data-auto_prompt="false"
-                 data-itp_support="true">
+                 data-itp_support="true"
+                 data-use_fedcm_for_prompt="true">
             </div>
             <div class="g_id_signin" data-type="standard"></div>
             <script src="https://accounts.google.com/gsi/client" async defer></script>
             <script>
                 function handleCredentialResponse(response) {{
-                    try {{
-                        // Use window.location if window.parent is restricted
-                        const targetWindow = window.parent || window;
-                        const url = new URL(targetWindow.location.href);
-                        
-                        url.searchParams.set('token', response.credential);
-                        targetWindow.location.href = url.toString();
-                    }} catch (e) {{
-                        console.error("Auth redirect failed:", e);
-                        // Fallback: update own location if parent is inaccessible
-                        const url = new URL(window.location.href);
-                        url.searchParams.set('token', response.credential);
-                        window.location.href = url.toString();
-                    }}
+                    // Get the current URL from the browser's address bar
+                    const currentUrl = new URL(window.location.ancestorOrigins[0] || window.location.href);
+                    currentUrl.searchParams.set('token', response.credential);
+                    
+                    // Force the parent window to redirect with the token
+                    // This is the most reliable way to bypass 'origin=null' issues in iframes
+                    window.open(currentUrl.href, "_parent");
                 }}
             </script>
         """
