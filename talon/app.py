@@ -58,19 +58,23 @@ def login_sidebar():
             <script src="https://accounts.google.com/gsi/client" async defer></script>
             <script>
                 function handleCredentialResponse(response) {{
-                    try {
-                        // Redirect the top-level window (parent) to include the token
-                        // Using _top or _parent is necessary for iframed Streamlit components
-                        const url = new URL(window.location.ancestorOrigins[0] || window.parent.location.href);
+                    try {{
+                        // Safely detect the parent URL for redirection
+                        const targetUrl = (window.location.ancestorOrigins && window.location.ancestorOrigins.length > 0) 
+                                          ? window.location.ancestorOrigins[0] 
+                                          : window.parent.location.href;
+                        const url = new URL(targetUrl);
                         url.searchParams.set('token', response.credential);
+                        
+                        // Force the parent window to redirect with the token
                         window.open(url.toString(), "_top");
-                    } catch (e) {
+                    }} catch (e) {{
                         console.error("Redirection failed:", e);
                         // Fallback: Try a normal reload if parent access is strictly blocked
                         const fallbackUrl = new URL(window.location.href);
                         fallbackUrl.searchParams.set('token', response.credential);
                         window.location.href = fallbackUrl.toString();
-                    }
+                    }}
                 }}
             </script>
         """
