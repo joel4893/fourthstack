@@ -12,7 +12,7 @@ import os
 
 # Resolve API URL from environment (set TALON_API_URL in deployment/secrets)
 API_URL = os.environ.get("TALON_API_URL", "https://talon-api-uvs9.onrender.com")
-GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID")
+GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID", "").strip()
 
 st.set_page_config(
     page_title="Talon",
@@ -59,18 +59,23 @@ def login_sidebar():
             <script>
                 function handleCredentialResponse(response) {{
                     try {{
-                        // Safely detect the parent URL for redirection
-                        const targetUrl = (window.location.ancestorOrigins && window.location.ancestorOrigins.length > 0) 
-                                          ? window.location.ancestorOrigins[0] 
-                                          : window.parent.location.href;
-                        const url = new URL(targetUrl);
-                        url.searchParams.set('token', response.credential);
+                        // Attempt to find the top-level URL
+                        let targetBase = "";
+                        if (window.location.ancestorOrigins && window.location.ancestorOrigins.length > 0) {{
+                            targetBase = window.location.ancestorOrigins[0];
+                        }} else if (document.referrer) {{
+                            targetBase = document.referrer;
+                        }} else {{
+                            targetBase = window.location.href;
+                        }}
+
+                        const url = new URL(targetBase);
+                        url.searchParams.set("token", response.credential);
                         
-                        // Force the parent window to redirect with the token
-                        window.open(url.toString(), "_top");
+                        // Redirect the top-level window
+                        window.top.location.href = url.toString();
                     }} catch (e) {{
-                        console.error("Redirection failed:", e);
-                        // Fallback: Try a normal reload if parent access is strictly blocked
+                        console.error("Auth redirection failed:", e);
                         const fallbackUrl = new URL(window.location.href);
                         fallbackUrl.searchParams.set('token', response.credential);
                         window.location.href = fallbackUrl.toString();

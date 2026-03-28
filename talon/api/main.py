@@ -34,7 +34,7 @@ import torch
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from core.synthesizer import synthesize, validate_dataframe
 
-GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID")
+GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID", "").strip()
 
 def keep_alive():
     """Ping own health endpoint to prevent Render spin-down."""
@@ -168,7 +168,12 @@ async def auth_google(request: Request):
 
     try:
         # Verify the Google Token
-        idinfo = id_token.verify_oauth2_token(token, google_auth_requests.Request(), GOOGLE_CLIENT_ID, clock_skew_in_seconds=10)
+        idinfo = id_token.verify_oauth2_token(
+            token, 
+            google_auth_requests.Request(), 
+            GOOGLE_CLIENT_ID, 
+            clock_skew_in_seconds=10
+        )
 
         email = idinfo['email']
         name = idinfo.get('name')
