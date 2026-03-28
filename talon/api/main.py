@@ -105,14 +105,12 @@ def init_db():
             except sqlite3.OperationalError:
                 pass
                 
-            conn.execute("""
-                CREATE TABLE IF NOT EXISTS users (
-                    email TEXT PRIMARY KEY,
-                    name TEXT,
-                    picture TEXT,
-                    last_login DATETIME DEFAULT CURRENT_TIMESTAMP
-                )
-            """)
+            # Robust User table setup
+            conn.execute("CREATE TABLE IF NOT EXISTS users (email TEXT PRIMARY KEY, name TEXT, picture TEXT, last_login DATETIME DEFAULT CURRENT_TIMESTAMP)")
+            
+            # Ensure last_login index for analytics performance
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_user_login ON users(last_login)")
+
             # Analytics and Feedback tables
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS visits (

@@ -48,15 +48,21 @@ def login_sidebar():
                  data-context="signin"
                  data-ux_mode="popup"
                  data-callback="handleCredentialResponse"
-                 data-auto_prompt="false">
+                 data-auto_prompt="false"
+                 data-itp_support="true">
             </div>
             <div class="g_id_signin" data-type="standard"></div>
             <script src="https://accounts.google.com/gsi/client" async defer></script>
             <script>
                 function handleCredentialResponse(response) {{
-                    const url = new URL(window.parent.location.href);
-                    url.searchParams.set('token', response.credential);
-                    window.parent.location.href = url.toString();
+                    try {{
+                        const url = new URL(window.parent.location.href);
+                        url.searchParams.set('token', response.credential);
+                        window.parent.location.href = url.toString();
+                    }} catch (e) {{
+                        console.error("Auth redirect failed:", e);
+                        alert("Please ensure third-party cookies are enabled or try a non-incognito window.");
+                    }}
                 }}
             </script>
         """
