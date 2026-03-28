@@ -51,21 +51,26 @@ def login_sidebar():
                  data-auto_prompt="false"
                  data-auto_select="false"
                  data-itp_support="true"
-                 data-use_fedcm_for_prompt="true">
+                 data-use_fedcm_for_prompt="true"
+                 data-allowed_parent_origin="https://fourthstack-y2zay9tdvuqldbbrqkx3hm.streamlit.app">
             </div>
             <div class="g_id_signin" data-type="standard"></div>
             <script src="https://accounts.google.com/gsi/client" async defer></script>
             <script>
                 function handleCredentialResponse(response) {{
-                    // ancestorOrigins[0] is the most reliable way to get the Streamlit app URL from an iframe
-                    const parentUrl = window.location.ancestorOrigins ? window.location.ancestorOrigins[0] : null;
-                    const targetBase = parentUrl || window.parent.location.href;
-                    
-                    const url = new URL(targetBase);
-                    url.searchParams.set('token', response.credential);
-                    
-                    // Force the parent window to redirect. This is the most reliable way to bypass 'origin=null' restrictions.
-                    window.open(url.toString(), "_parent");
+                    try {
+                        // Redirect the top-level window (parent) to include the token
+                        // Using _top or _parent is necessary for iframed Streamlit components
+                        const url = new URL(window.location.ancestorOrigins[0] || window.parent.location.href);
+                        url.searchParams.set('token', response.credential);
+                        window.open(url.toString(), "_top");
+                    } catch (e) {
+                        console.error("Redirection failed:", e);
+                        // Fallback: Try a normal reload if parent access is strictly blocked
+                        const fallbackUrl = new URL(window.location.href);
+                        fallbackUrl.searchParams.set('token', response.credential);
+                        window.location.href = fallbackUrl.toString();
+                    }
                 }}
             </script>
         """
